@@ -1,9 +1,9 @@
 # FNIRSI-1013D-WAV-Viewer-in-Excel-VBA
 Load, View, Analyze FNIRSI 1013D .wav files in Excel with VBA
 
-V1.10:
-Added button for csv output
-Converted to LibreOffice ods
+V1.10:<br>
+Added button for csv output<br>
+Converted to LibreOffice ods<br>
 Bugfixes
 
 Credits to Robert Tidey who decoded the 1013D .wav file format:
