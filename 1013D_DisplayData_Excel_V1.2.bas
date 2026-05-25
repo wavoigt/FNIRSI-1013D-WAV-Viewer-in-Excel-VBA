@@ -65,7 +65,7 @@ Sub PlotData(ch, dataStart, dataSize)
     
     probe = 10 ^ Bytes(10 + (ch - 1) * 10) ' Probe X
     Range("ProbeCh1").Offset(ch - 1) = probe
-    vMult = VScaleArr(Bytes(4 + (ch - 1) * 10)) * probe ' Vertical scale
+    vMult = VScaleArr(Bytes(4 + (ch - 1) * 10)) ' Vertical scale
     Range("VDivCh1").Offset(ch - 1) = vMult
     tMult = TScaleArr(Bytes(22))           ' Time scale
     Range("TDivCh1").Offset(ch - 1) = tMult
@@ -126,9 +126,9 @@ Public Function Get_FileName() As String
     
     With f
         .Title = "Open File"                      'Fenstertitel
-        .AllowMultiSelect = False                 'Nur eine Datei auswählbar
+        .AllowMultiSelect = False                 'Nur eine Datei auswÃ¤hlbar
         .ButtonName = "Open"                      'Button Beschriftung
-        .Filters.Clear                            'erst alle Filter löschen
+        .Filters.Clear                            'erst alle Filter lÃ¶schen
         .Filters.Add "FNIRSI 1013D", "*.wav"      'dann eigene anlegen
         '.FilterIndex = 1                          'einen Filter vorselektieren
         .InitialFileName = FileName               'Startverzeichnis
