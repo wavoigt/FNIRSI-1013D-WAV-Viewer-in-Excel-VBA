@@ -1,28 +1,47 @@
 Attribute VB_Name = "Modul1"
 ' FNIRSI-1013D WAV Viewer for Excel VBA
-' Data Format: original Firmware .wav Format
+' Data Format: original FNIRSI Firmware .wav Format
+' Macro settings: Datei - Optionen - Trust Center - Einstellungen... - Makroeinstellungen
+'                 (x) Deaktivieren von Macros mit Benachrichtigung
+'                 (x) Zugriff auf das VBA Projektobjektmodell vertrauen
 ' History:
-' V1.20: Corrected Signal offset
+' V1.30: Opens also Data format Peco V0005 and Atlan V0.26d
+'        and CSV Export
 
 Option Explicit
 
-Public Const Version = "V1.20"
+Public Const Version = "V1.30"
+Public Enum FileVersions: None: Orig: V0005: V026d: CSV: End Enum
 
 Dim Bytes     'The whole file in a Bytes Array
 Dim VScaleArr
+Dim VProbeArr
 Dim TScaleArr
 Dim ChRow0 As Long
 Dim Ch1Col As Long
 Dim Ch2Col As Long
 Dim TimCol As Long
+Dim PlotSize As Long
+
+Dim index As Integer
+Dim vVal As Single
+Dim vMult As Single
+Dim tMult As Single
+Dim probe As Single
+Dim rawPos As Long
+Dim rowcnt As Long
+Dim dataEnd As Long
 
 Dim FileName As String
 Dim FileIsOpen As Boolean
+Public FileVersion As Integer
+
 
 Sub LoadData()
-    VScaleArr = Array(5, 2.5, 1, 0.5, 0.2, 0.1, 0.05)
-    TScaleArr = Array(50, 20, 10, 5, 2, 1, 0.5, 0.2, 0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001, 0.0005, 0.0002, 0.0001, 0.00005, 0.00002, 0.00001, 0.000005, 0.000002, 0.000001, 0.0000005, 0.0000002, 0.0000001, 0.00000005, 0.00000002, 0.00000001)
+    
     On Error GoTo ErrHandler
+    VScaleArr = Array(5, 2.5, 1, 0.5, 0.2, 0.1, 0.05)
+    VProbeArr = Array(0.5, 1, 10, 20, 50, 100, 1000)
     With CreateObject("ADODB.Stream")  ' load file
         .Open
         .Type = 1  ' adTypeBinary
@@ -35,15 +54,24 @@ Sub LoadData()
     Ch2Col = Range("Ch2Vals").Column
     ChRow0 = Range("Ch1Vals").Row
     Range("Version") = Version
-    Range(Cells(ChRow0 + 1, Ch1Col), Cells(ChRow0 + 1500, Ch2Col)).ClearContents
+    Range(Cells(ChRow0 + 1, TimCol), Cells(ChRow0 + 3000, Ch2Col)).ClearContents
     Cells(ChRow0 + 1, Ch1Col) = " "
     Cells(ChRow0 + 1, Ch2Col) = " "
     If (Range("ChkChan2") = False) Then Range("ChkChan1") = True
     Application.Calculation = xlCalculationManual
-    If (Range("ChkChan1") = True) Then PlotData 1, 1000, 3000  ' plot Data Channel
-    If (Range("ChkChan2") = True) Then PlotData 2, 4000, 3000
-'    If (Range("ChkChan1") = True) Then PlotData 1, 7000, 1500  ' plot Screen Channel
-'    If (Range("ChkChan2") = True) Then PlotData 2, 8500, 1500
+    If FileVersion = Orig Then
+        PlotSize = 1500
+        If (Range("ChkChan1") = True) Then PlotData 1, 1000, 3000      ' plot Data Channel
+        If (Range("ChkChan2") = True) Then PlotData 2, 4000, 3000
+    ElseIf FileVersion = V0005 Then
+        PlotSize = 3000
+        If (Range("ChkChan1") = True) Then PlotData_0005 1, 800, 3000  ' plot Data Channel
+        If (Range("ChkChan2") = True) Then PlotData_0005 2, 3800, 3000
+    ElseIf FileVersion = V026d Then
+        PlotSize = 3000
+        If (Range("ChkChan1") = True) Then PlotData_026d 1, 800, 3000  ' plot Data Channel
+        If (Range("ChkChan2") = True) Then PlotData_026d 2, 3800, 3000
+    End If
     Application.Calculation = xlCalculationAutomatic
     FileIsOpen = True
 Exit Sub
@@ -52,32 +80,156 @@ ErrHandler:
 End Sub
 
 
-Sub PlotData(ch, dataStart, dataSize)
+Function Bytes2Long(ByVal offset As Long) As Long
+  Bytes2Long = CLng(Bytes(offset)) + _
+              (CLng(Bytes(offset + 1)) * 256&) + _
+              (CLng(Bytes(offset + 2)) * 65536) + _
+              (CLng(Bytes(offset + 3)) * 16777216)
+End Function
     
-    Dim index As Integer
-    Dim vVal As Integer
-    Dim vMult As Single
-    Dim tMult As Single
-    Dim probe As Single
-    Dim rawPos As Integer
-    Dim rowcnt As Integer
-    Dim dataEnd As Integer
+
+
+Sub PlotData_026d(ch, dataStart, PlotSize) ' Atlan V0.26d data format
     
-    probe = 10 ^ Bytes(10 + (ch - 1) * 10) ' Probe X
-    Range("ProbeCh1").Offset(ch - 1) = probe
-    vMult = VScaleArr(Bytes(4 + (ch - 1) * 10)) ' Vertical scale
-    Range("VDivCh1").Offset(ch - 1) = vMult
-    tMult = TScaleArr(Bytes(22))           ' Time scale
-    Range("TDivCh1").Offset(ch - 1) = tMult
-    rawPos = Bytes(85 + (ch - 1) * 2) * 256 + Bytes(84 + (ch - 1) * 2)
+    On Error GoTo ErrHandler
+    If Bytes(32 + (ch - 1) * 96) = 0 Then
+      Cells(ChRow0 + 1, Ch1Col + ch - 1) = "disabled"
+      Exit Sub
+    End If
+    TScaleArr = Array(1000, 500, 200, 100, 50, 20, 10, 5, 2, 1, 0.5, 0.2, 0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001, 0.0005, 0.0002, 0.0001, 0.00005, _
+                      0.00002, 0.00001, 0.000005, 0.000002, 0.000001, 0.0000005, 0.0000002, 0.0000001, 0.00000005, 0.00000002, 0.00000001, 0.000000005)
+    Dim pLong As Long: pLong = Bytes(52 + (ch - 1) * 96)
+    If pLong < 7 Then
+        probe = VProbeArr(pLong) ' Probe X
+    Else: GoTo ErrHandler
+    End If
+    Range("ProbeCh1").offset(ch - 1) = probe
+    Dim vLong As Long: vLong = Bytes2Long(40 + (ch - 1) * 96)
+    If vLong < 7 Then
+        vMult = VScaleArr(vLong) ' Vertical scale
+    Else: GoTo ErrHandler
+    End If
+    Range("VDivCh1").offset(ch - 1) = vMult
+    If Bytes2Long(224) < 35 Then
+        tMult = TScaleArr(Bytes2Long(224)) ' Time scale
+    Else: GoTo ErrHandler
+    End If
+    Range("TDivCh1").offset(ch - 1) = tMult
+    rawPos = Bytes2Long(60 + (ch - 1) * 96)
+    'Debug.Print ("Channel " & ch)
+    'Debug.Print ("--------------")
+    'Debug.Print ("probe " & probe)
+    'Debug.Print ("vMult " & vMult)
+    'Debug.Print ("tMult " & tMult)
+    'Debug.Print ("tMultN " & Bytes2Long(224))
+    'Debug.Print ("rawPos " & rawPos & vbCrLf)
     rowcnt = ChRow0
-    dataEnd = dataStart + dataSize - 2
+    dataEnd = dataStart + PlotSize - 1
+    For index = dataStart To dataEnd
+        rowcnt = rowcnt + 1
+        vVal = (CInt(Bytes(index)) - 130) * 1.8
+        Cells(rowcnt, TimCol) = (rowcnt - 2) * tMult / 100         ' Horizontal
+        Cells(rowcnt, Ch1Col + ch - 1) = vVal * vMult / 50 * probe ' Vertical
+    Next
+Exit Sub
+ErrHandler:
+    Call MsgBox("Wrong data format", vbCritical Or vbOKOnly, Error)
+End Sub
+
+
+
+Sub PlotData_0005(ch, dataStart, PlotSize) ' Peco V0.005 data format
+    
+    On Error GoTo ErrHandler
+    If Bytes(40 + (ch - 1) * 120) = 0 Then
+      Cells(ChRow0 + 1, Ch1Col + ch - 1) = "disabled"
+      Exit Sub
+    End If
+    '                   0    1                       5                                   10
+    '                              15                                                    20
+    TScaleArr = Array(0.2, 0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001, 0.0005, 0.0002, 0.0001, 0.00005, 0.00002, 0.00001, _
+                      0.000005, 0.000002, 0.000001, 0.0000005, 0.0000002, 0.0000001, 0.00000005, 0.00000002, 0.00000001)
+    Dim pLong As Long: pLong = 10 ^ Bytes(60 + (ch - 1) * 120)
+    If pLong < 101 Then
+        probe = pLong ' Probe X
+    Else: GoTo ErrHandler
+    End If
+    Range("ProbeCh1").offset(ch - 1) = probe
+    Dim vLong As Long: vLong = Bytes2Long(48 + (ch - 1) * 120)
+    If vLong < 7 Then
+        vMult = VScaleArr(vLong) ' Vertical scale
+    Else: GoTo ErrHandler
+    End If
+    Range("VDivCh1").offset(ch - 1) = vMult
+    If Bytes2Long(280) < 23 Then
+        tMult = TScaleArr(Bytes2Long(280)) ' Time scale
+    Else: GoTo ErrHandler
+    End If
+    Range("TDivCh1").offset(ch - 1) = tMult
+    rawPos = Bytes2Long(64 + (ch - 1) * 120)
+'    Debug.Print ("Channel " & ch)
+'    Debug.Print ("--------------")
+'    Debug.Print ("probe " & probe)
+'    Debug.Print ("vMult " & vMult)
+'    Debug.Print ("tMult " & tMult)
+'    Debug.Print ("tMultN " & Bytes2Long(280))
+'    Debug.Print ("rawPos " & rawPos & vbCrLf)
+    rowcnt = ChRow0
+    dataEnd = dataStart + PlotSize - 1
+    For index = dataStart To dataEnd
+        rowcnt = rowcnt + 1
+        vVal = (Bytes(index) - 128) * 1.8
+        Cells(rowcnt, TimCol) = (rowcnt - 2) * tMult / 100         ' Horizontal
+        Cells(rowcnt, Ch1Col + ch - 1) = vVal * vMult / 50 * probe ' Vertical
+    Next
+Exit Sub
+ErrHandler:
+    Call MsgBox("Wrong data format", vbCritical Or vbOKOnly, Error)
+End Sub
+
+
+
+Sub PlotData(ch, dataStart, PlotSize) ' original data format
+    
+    On Error GoTo ErrHandler
+    TScaleArr = Array(50, 20, 10, 5, 2, 1, 0.5, 0.2, 0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001, 0.0005, 0.0002, 0.0001, _
+                      0.00005, 0.00002, 0.00001, 0.000005, 0.000002, 0.000001, 0.0000005, 0.0000002, 0.0000001, 0.00000005, 0.00000002, 0.00000001)
+    Dim pLong As Long: pLong = 10 ^ Bytes(10 + (ch - 1) * 10)
+    If pLong < 101 Then
+        probe = pLong ' Probe X
+    Else: GoTo ErrHandler
+    End If
+    Range("ProbeCh1").offset(ch - 1) = probe
+    Dim vLong As Long: vLong = Bytes(4 + (ch - 1) * 10)
+    If vLong < 7 Then
+       vMult = VScaleArr(vLong) * probe  ' Vertical scale
+    Else: GoTo ErrHandler
+    End If
+    Range("VDivCh1").offset(ch - 1) = vMult
+    If Bytes(22) < 30 Then
+        tMult = TScaleArr(Bytes(22))           ' Time scale
+    Else: GoTo ErrHandler
+    End If
+    Range("TDivCh1").offset(ch - 1) = tMult
+    rawPos = Bytes(85 + (ch - 1) * 2) * 256 + Bytes(84 + (ch - 1) * 2)
+'    Debug.Print ("Channel " & ch)
+'    Debug.Print ("--------------")
+'    Debug.Print ("probe " & probe)
+'    Debug.Print ("vMult " & vMult)
+'    Debug.Print ("tMult " & tMult)
+'    Debug.Print ("tMultN " & Bytes(22))
+'    Debug.Print ("rawPos " & rawPos & vbCrLf)
+    rowcnt = ChRow0
+    dataEnd = dataStart + PlotSize - 2
     For index = dataStart To dataEnd Step 2
         rowcnt = rowcnt + 1
         vVal = (Bytes(index + 1) * 256 + Bytes(index)) - rawPos
-        Cells(rowcnt, TimCol) = (rowcnt - 2) * tMult / 50    ' Horizontal
-        Cells(rowcnt, Ch1Col + ch - 1) = vVal * vMult / 50 * probe ' Vertical
+        Cells(rowcnt, TimCol) = (rowcnt - 2) * tMult / 50  ' Horizontal
+        Cells(rowcnt, Ch1Col + ch - 1) = vVal * vMult / 50 ' Vertical
     Next
+Exit Sub
+ErrHandler:
+    Call MsgBox("Wrong data format", vbCritical Or vbOKOnly, Error)
 End Sub
 
 
@@ -93,15 +245,29 @@ Sub Export_CSV()
     f = FreeFile()
     FileName = Range("FileName")
     Open FileName & ".csv" For Output As #f
-    For rowcnt = ChRow0 + 1 To ChRow0 + 1500
+    For rowcnt = ChRow0 + 1 To ChRow0 + PlotSize
         Print #f, CStr(Cells(rowcnt, TimCol)) & ";" & CStr(Cells(rowcnt, Ch1Col)) & ";" & CStr(Cells(rowcnt, Ch2Col))
     Next
     Close #f
+    Call MsgBox("CSV File saved", vbInformation Or vbOKOnly, Error)
 Exit Sub
 ErrHandler:
     Call MsgBox("Error saving csv file", vbCritical Or vbOKOnly, Error)
 End Sub
 
+
+Sub DropdownSelect()
+    Dim dd As DropDown
+    Set dd = ActiveSheet.Shapes("Drop Down 13").OLEFormat.Object
+    FileVersion = Range("DropDn")
+    If dd.ListIndex = CSV Then
+        Export_CSV
+        dd.ListIndex = FileVersion
+    Else
+        FileVersion = dd.ListIndex
+        Range("DropDn") = FileVersion
+    End If
+End Sub
 
 
 Sub Chan_Select()
@@ -139,5 +305,3 @@ Public Function Get_FileName() As String
         Get_FileName = f.SelectedItems(1)
     End If
 End Function
-
-
