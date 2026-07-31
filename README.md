@@ -19,4 +19,8 @@ https://github.com/roberttidey/FNISR1013DScope<br>
 and to pecostm32 who created Firmware V0.0005<br>
 https://github.com/pecostm32/FNIRSI_1013D_Firmware<br>
 and to Atlan4 for creating Firmware V0.2xx<br> 
-https://github.com/Atlan4/Fnirsi1013D
+https://github.com/Atlan4/Fnirsi1013D<br><br>
+
+vollmann-ariel made a HTML / Javascript version which is working without Excel:<br>
+https://github.com/vollmann-ariel/FNIRSI-1013D-HTML-WAV-Viewer
+
